@@ -118,10 +118,11 @@
   <header>
     <h1>Realtime Prompt Token Counter</h1>
     <p>Counts your prompt with <code>o200k_base</code> — the exact BPE used by the gpt-realtime / gpt-4o family — and checks it against the realtime session <code>instructions</code> ceiling. Paste your full prompt (including any tool/function schemas). Everything runs in your browser.</p>
+    <p style="margin:0 0 20px;color:var(--muted);font-size:13px;">Handles <b style="color:var(--text)">English mixed with Hindi, Marathi, Tamil, Telugu, Kannada, Bengali, Gujarati, Punjabi, Malayalam and Arabic</b> — each script is counted accurately and broken out below.</p>
   </header>
 
   <div class="editor">
-    <textarea id="input" placeholder="Paste your prompt here…  (Hindi / Marathi / Devanagari is handled correctly — token cost is measured, not guessed.)"></textarea>
+    <textarea id="input" placeholder="Paste your prompt here…  English mixed with Hindi, Marathi, Tamil, Telugu, Kannada, Bengali, Gujarati, Punjabi, Malayalam or Arabic is handled correctly — token cost is measured, not guessed."></textarea>
   </div>
 
   <div class="toolbar">
