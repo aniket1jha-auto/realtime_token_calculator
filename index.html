@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Realtime Prompt Token Counter — gpt-realtime (o200k_base)</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e222b;
+    --border: #2a2f3a;
+    --text: #e6e9ef;
+    --muted: #9aa3b2;
+    --accent: #5b8cff;
+    --ok: #2ecc71;
+    --warn: #f1c40f;
+    --bad: #ff5c5c;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 28px 20px 60px; }
+  header h1 { font-size: 20px; margin: 0 0 4px; }
+  header p { margin: 0 0 20px; color: var(--muted); font-size: 13px; }
+  header code { font-family: var(--mono); color: var(--accent); }
+
+  .editor { position: relative; }
+  textarea {
+    width: 100%;
+    min-height: 320px;
+    resize: vertical;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    font-family: var(--mono);
+    font-size: 13.5px;
+    line-height: 1.6;
+    outline: none;
+  }
+  textarea:focus { border-color: var(--accent); }
+
+  .toolbar { display: flex; gap: 8px; align-items: center; margin: 10px 0 18px; flex-wrap: wrap; }
+  button {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 12px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  .toolbar .spacer { flex: 1; }
+  .limit-box { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  .limit-box input {
+    width: 78px; background: var(--panel); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px;
+    font-family: var(--mono); font-size: 13px;
+  }
+
+  /* verdict bar */
+  .verdict {
+    border-radius: 12px; padding: 18px 20px; margin-bottom: 18px;
+    border: 1px solid var(--border); background: var(--panel);
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  }
+  .verdict .big { font-size: 34px; font-weight: 700; font-family: var(--mono); }
+  .verdict .label { font-size: 13px; color: var(--muted); }
+  .pill {
+    padding: 6px 14px; border-radius: 999px; font-weight: 600; font-size: 14px;
+  }
+  .pill.ok { background: rgba(46,204,113,.15); color: var(--ok); }
+  .pill.warn { background: rgba(241,196,15,.15); color: var(--warn); }
+  .pill.bad { background: rgba(255,92,92,.15); color: var(--bad); }
+
+  .bar { height: 10px; width: 100%; background: var(--panel-2); border-radius: 999px; overflow: hidden; margin-top: 6px; }
+  .bar > i { display: block; height: 100%; width: 0%; background: var(--ok); transition: width .15s, background .15s; }
+  .bar.warn > i { background: var(--warn); }
+  .bar.bad > i { background: var(--bad); }
+  .verdict .barwrap { flex: 1; min-width: 220px; }
+
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .card .v { font-size: 22px; font-weight: 700; font-family: var(--mono); }
+  .card .k { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .card .hint { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+  .note {
+    background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 12px 16px; font-size: 13px; color: var(--muted); margin-bottom: 16px;
+  }
+  .note.flag { border-left-color: var(--warn); }
+  .note b { color: var(--text); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; }
+  td.num { font-family: var(--mono); text-align: right; }
+  .section-title { font-size: 13px; color: var(--muted); margin: 22px 0 4px; text-transform: uppercase; letter-spacing: .04em; }
+
+  #status { font-size: 12px; color: var(--muted); }
+  .err { color: var(--bad); }
+  footer { margin-top: 30px; font-size: 12px; color: var(--muted); }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Realtime Prompt Token Counter</h1>
+    <p>Counts your prompt with <code>o200k_base</code> — the exact BPE used by the gpt-realtime / gpt-4o family — and checks it against the realtime session <code>instructions</code> ceiling. Paste your full prompt (including any tool/function schemas). Everything runs in your browser.</p>
+  </header>
+
+  <div class="editor">
+    <textarea id="input" placeholder="Paste your prompt here…  (Hindi / Marathi / Devanagari is handled correctly — token cost is measured, not guessed.)"></textarea>
+  </div>
+
+  <div class="toolbar">
+    <button id="paste">Paste from clipboard</button>
+    <button id="clear">Clear</button>
+    <button id="sample">Load Devanagari sample</button>
+    <div class="spacer"></div>
+    <div class="limit-box">
+      <label for="limit">Limit</label>
+      <input id="limit" type="number" value="16384" min="1" />
+      <span>tokens</span>
+    </div>
+  </div>
+
+  <div class="verdict">
+    <div>
+      <div class="big" id="tokCount">—</div>
+      <div class="label">tokens</div>
+    </div>
+    <div class="barwrap">
+      <div id="pill" class="pill ok">Ready</div>
+      <div class="bar" id="bar"><i></i></div>
+      <div class="label" id="barLabel" style="margin-top:6px;"></div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card"><div class="v" id="chars">0</div><div class="k">Characters</div></div>
+    <div class="card"><div class="v" id="bytes">0</div><div class="k">UTF-8 bytes</div></div>
+    <div class="card"><div class="v" id="ratio">0.00</div><div class="k">Tokens / char</div><div class="hint" id="ratioHint">&nbsp;</div></div>
+    <div class="card"><div class="v" id="headroom">0</div><div class="k">Headroom</div><div class="hint">tokens to limit</div></div>
+  </div>
+
+  <div class="note flag" id="devNote" style="display:none;"></div>
+
+  <div class="section-title">Script breakdown</div>
+  <table>
+    <thead><tr><th>Script</th><th>Characters</th><th>Tokens</th><th>Tokens / char</th></tr></thead>
+    <tbody id="scriptRows"></tbody>
+  </table>
+
+  <div id="status" style="margin-top:18px;">Loading tokenizer…</div>
+
+  <footer>
+    Token counts use the <code>o200k_base</code> encoding via
+    <a href="https://www.npmjs.com/package/gpt-tokenizer" target="_blank" rel="noopener">gpt-tokenizer</a>,
+    a faithful port of OpenAI's tiktoken. Counts match tiktoken's <code>o200k_base</code> exactly.
+    The realtime <code>instructions</code> ceiling is a hard, separate limit checked at session-config time — it is not your context window.
+  </footer>
+</div>
+
+<script type="module">
+  const $ = (id) => document.getElementById(id);
+  const statusEl = $("status");
+
+  let encode = null;
+
+  // Load gpt-tokenizer o200k_base from CDN (with fallbacks).
+  const sources = [
+    "https://esm.sh/gpt-tokenizer@2/encoding/o200k_base",
+    "https://cdn.jsdelivr.net/npm/gpt-tokenizer@2/+esm",
+  ];
+  async function loadTokenizer() {
+    for (const url of sources) {
+      try {
+        const mod = await import(url);
+        if (typeof mod.encode === "function") return mod.encode;
+        if (mod.default && typeof mod.default.encode === "function") return mod.default.encode.bind(mod.default);
+      } catch (e) { /* try next */ }
+    }
+    return null;
+  }
+
+  // UTF-8 byte length
+  const byteLen = (s) => new TextEncoder().encode(s).length;
+
+  // Script classification per character.
+  function classify(cp) {
+    if (cp >= 0x0900 && cp <= 0x097F) return "Devanagari (Hindi/Marathi)";
+    if (cp >= 0x0980 && cp <= 0x09FF) return "Bengali";
+    if (cp >= 0x0A00 && cp <= 0x0A7F) return "Gurmukhi (Punjabi)";
+    if (cp >= 0x0A80 && cp <= 0x0AFF) return "Gujarati";
+    if (cp >= 0x0B80 && cp <= 0x0BFF) return "Tamil";
+    if (cp >= 0x0C00 && cp <= 0x0C7F) return "Telugu";
+    if (cp >= 0x0C80 && cp <= 0x0CFF) return "Kannada";
+    if (cp >= 0x0D00 && cp <= 0x0D7F) return "Malayalam";
+    if (cp >= 0x0600 && cp <= 0x06FF) return "Arabic";
+    if (cp >= 0x0750 && cp <= 0x077F) return "Arabic";            // Arabic Supplement
+    if (cp >= 0x08A0 && cp <= 0x08FF) return "Arabic";            // Arabic Extended-A
+    if (cp >= 0xFB50 && cp <= 0xFDFF) return "Arabic";            // Presentation Forms-A
+    if (cp >= 0xFE70 && cp <= 0xFEFF) return "Arabic";            // Presentation Forms-B
+    if (cp <= 0x007F) return "ASCII / Latin";
+    if (cp >= 0x0080 && cp <= 0x024F) return "Latin (extended)";
+    if (cp >= 0x2000 && cp <= 0x206F) return "Punctuation / symbols";
+    if (cp >= 0x1F000) return "Emoji / symbols";
+    return "Other";
+  }
+
+  function fmt(n) { return n.toLocaleString("en-US"); }
+
+  function compute() {
+    const text = $("input").value;
+    const limit = Math.max(1, parseInt($("limit").value || "16384", 10));
+
+    const chars = [...text].length;
+    const bytes = byteLen(text);
+
+    let tokens = 0;
+    if (encode) {
+      try { tokens = encode(text).length; } catch (e) { tokens = 0; }
+    }
+
+    $("tokCount").textContent = encode ? fmt(tokens) : "—";
+    $("chars").textContent = fmt(chars);
+    $("bytes").textContent = fmt(bytes);
+    const ratio = chars ? tokens / chars : 0;
+    $("ratio").textContent = ratio.toFixed(2);
+    $("headroom").textContent = fmt(limit - tokens);
+
+    // ratio hint
+    const rh = $("ratioHint");
+    if (!chars) rh.textContent = " ";
+    else if (ratio > 0.7) rh.textContent = "⚠ script-bloated";
+    else if (ratio > 0.45) rh.textContent = "mixed";
+    else rh.textContent = "Latin-efficient";
+
+    // verdict
+    const pct = Math.min(100, (tokens / limit) * 100);
+    const bar = $("bar");
+    const barI = bar.querySelector("i");
+    barI.style.width = pct + "%";
+    const pill = $("pill");
+    bar.className = "bar";
+    pill.className = "pill";
+    if (tokens > limit) {
+      bar.classList.add("bad"); pill.classList.add("bad");
+      pill.textContent = `Over by ${fmt(tokens - limit)} tokens — will fail at session config`;
+    } else if (tokens > limit * 0.9) {
+      bar.classList.add("warn"); pill.classList.add("warn");
+      pill.textContent = `Tight — ${fmt(limit - tokens)} tokens of headroom`;
+    } else {
+      bar.classList.add("ok"); pill.classList.add("ok");
+      pill.textContent = chars ? `Fits — ${fmt(limit - tokens)} tokens of headroom` : "Ready";
+    }
+    $("barLabel").textContent = chars ? `${pct.toFixed(1)}% of ${fmt(limit)} limit` : "";
+
+    // script breakdown
+    const buckets = {};
+    for (const ch of text) {
+      const cp = ch.codePointAt(0);
+      const name = classify(cp);
+      if (!buckets[name]) buckets[name] = { chars: 0, text: "" };
+      buckets[name].chars += 1;
+      buckets[name].text += ch;
+    }
+    const rows = Object.entries(buckets)
+      .map(([name, b]) => {
+        let t = 0;
+        if (encode) { try { t = encode(b.text).length; } catch (e) {} }
+        return { name, chars: b.chars, tokens: t, ratio: b.chars ? t / b.chars : 0 };
+      })
+      .sort((a, b) => b.tokens - a.tokens);
+
+    $("scriptRows").innerHTML = rows.map(r =>
+      `<tr><td>${r.name}</td><td class="num">${fmt(r.chars)}</td><td class="num">${fmt(r.tokens)}</td><td class="num">${r.ratio.toFixed(2)}</td></tr>`
+    ).join("") || `<tr><td colspan="4" style="color:var(--muted)">No text yet.</td></tr>`;
+
+    // Non-Latin (Indic + Arabic) advisory — these scripts cost far more tokens per character.
+    const heavy = rows.filter(r => /Devanagari|Bengali|Gurmukhi|Gujarati|Tamil|Telugu|Kannada|Malayalam|Arabic/.test(r.name));
+    const heavyTokens = heavy.reduce((s, r) => s + r.tokens, 0);
+    const heavyChars = heavy.reduce((s, r) => s + r.chars, 0);
+    const dev = $("devNote");
+    if (heavyTokens > 0) {
+      const share = tokens ? ((heavyTokens / tokens) * 100).toFixed(0) : 0;
+      const names = heavy.map(r => r.name).join(", ");
+      dev.style.display = "block";
+      dev.innerHTML =
+        `<b>${fmt(heavyTokens)} tokens (${share}% of total)</b> come from ${fmt(heavyChars)} non-Latin characters (${names}) — ` +
+        `roughly <b>${(heavyTokens / Math.max(1, heavyChars)).toFixed(1)}× the cost per character</b> of Latin text. ` +
+        `Only the lines the agent <i>speaks aloud</i> need the native script. Stage logic, branch conditions, objection rules and tool schemas are never spoken — ` +
+        `write those in English/ASCII to reclaim most of this budget.`;
+    } else {
+      dev.style.display = "none";
+    }
+  }
+
+  // events
+  let t = null;
+  $("input").addEventListener("input", () => { clearTimeout(t); t = setTimeout(compute, 80); });
+  $("limit").addEventListener("input", compute);
+  $("clear").addEventListener("click", () => { $("input").value = ""; compute(); $("input").focus(); });
+  $("paste").addEventListener("click", async () => {
+    try { $("input").value = await navigator.clipboard.readText(); compute(); }
+    catch (e) { statusEl.innerHTML = '<span class="err">Clipboard blocked — paste manually with Cmd/Ctrl+V.</span>'; }
+  });
+  $("sample").addEventListener("click", () => {
+    $("input").value =
+`# ROLE
+You are an outbound voice agent for a loan-activation campaign. Follow the stage machine strictly.
+
+## STAGE 1 — GREETING
+Speak: "नमस्ते, मैं प्रिया बात कर रही हूँ XYZ फाइनेंस से। क्या मैं आपसे दो मिनट बात कर सकती हूँ?"
+If user says no → go to STAGE_CLOSE_POLITE.
+
+## STAGE 2 — PITCH
+Speak: "आपका लोन अप्रूव हो चुका है। बस ऐप में एक छोटा सा step बाकी है।"
+Handle objection "मुझे interest नहीं है" → empathize, restate benefit, ask one question.`;
+    compute();
+  });
+
+  // boot
+  encode = await loadTokenizer();
+  if (encode) {
+    statusEl.textContent = "Tokenizer ready (o200k_base). Counts match tiktoken exactly.";
+    compute();
+  } else {
+    statusEl.innerHTML = '<span class="err">Could not load the o200k_base tokenizer from CDN. Check your internet connection and reload.</span>';
+  }
+</script>
+</body>
+</html>
