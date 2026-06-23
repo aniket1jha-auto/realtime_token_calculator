@@ -107,6 +107,25 @@
   td.num { font-family: var(--mono); text-align: right; }
   .section-title { font-size: 13px; color: var(--muted); margin: 22px 0 4px; text-transform: uppercase; letter-spacing: .04em; }
 
+  .seclist { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .secrow {
+    position: relative; display: grid; grid-template-columns: 1fr auto;
+    align-items: center; gap: 12px; padding: 9px 12px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden;
+  }
+  .secrow .fill {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 0%;
+    background: rgba(91,140,255,.13); z-index: 0;
+  }
+  .secrow.top .fill { background: rgba(255,92,92,.16); }
+  .secrow > * { position: relative; z-index: 1; }
+  .secrow .name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .secrow .lvl { color: var(--muted); font-family: var(--mono); font-size: 11px; margin-right: 6px; }
+  .secrow .meta { font-family: var(--mono); font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+  .secrow .meta b { color: var(--text); }
+  .seclist .empty { color: var(--muted); font-size: 13px; padding: 6px 2px; }
+
   #status { font-size: 12px; color: var(--muted); }
   .err { color: var(--bad); }
   footer { margin-top: 30px; font-size: 12px; color: var(--muted); }
@@ -157,6 +176,9 @@
   </div>
 
   <div class="note flag" id="devNote" style="display:none;"></div>
+
+  <div class="section-title">Heaviest sections <span id="segMode" style="text-transform:none;letter-spacing:0;color:var(--muted);font-weight:400;"></span></div>
+  <div id="sectionList" class="seclist"></div>
 
   <div class="section-title">Script breakdown</div>
   <table>
@@ -222,6 +244,41 @@
   }
 
   function fmt(n) { return n.toLocaleString("en-US"); }
+
+  // Split a prompt into editable blocks.
+  // Primary: Markdown headings (# .. ######). Fallback: blank-line paragraphs.
+  function segment(text) {
+    const lines = text.split("\n");
+    const headingRe = /^\s{0,3}(#{1,6})\s+(.*\S)?\s*$/;
+    const idx = [];
+    lines.forEach((l, i) => { if (headingRe.test(l)) idx.push(i); });
+
+    if (idx.length >= 2) {
+      const sections = [];
+      if (idx[0] > 0) {
+        const body = lines.slice(0, idx[0]).join("\n");
+        if (body.trim()) sections.push({ title: "intro (before first heading)", level: 0, body });
+      }
+      for (let k = 0; k < idx.length; k++) {
+        const start = idx[k];
+        const end = k + 1 < idx.length ? idx[k + 1] : lines.length;
+        const m = lines[start].match(headingRe);
+        sections.push({
+          title: (m[2] || "(untitled heading)").trim(),
+          level: m[1].length,
+          body: lines.slice(start, end).join("\n"),
+        });
+      }
+      return { mode: "Markdown headings", sections };
+    }
+
+    const blocks = text.split(/\n\s*\n/).filter(b => b.trim().length);
+    const sections = blocks.map((b, i) => {
+      const first = b.trim().split("\n")[0].replace(/\s+/g, " ").slice(0, 64);
+      return { title: first || `block ${i + 1}`, level: 0, body: b };
+    });
+    return { mode: "blank-line blocks", sections };
+  }
 
   function compute() {
     const text = $("input").value;
@@ -306,6 +363,39 @@
         `write those in English/ASCII to reclaim most of this budget.`;
     } else {
       dev.style.display = "none";
+    }
+
+    // Section breakdown — which blocks of the prompt cost the most tokens.
+    const list = $("sectionList");
+    const modeEl = $("segMode");
+    if (!text.trim() || !encode) {
+      modeEl.textContent = "";
+      list.innerHTML = `<div class="empty">${encode ? "Paste a prompt to see which sections cost the most." : ""}</div>`;
+    } else {
+      const { mode, sections } = segment(text);
+      const secs = sections.map(s => {
+        let t = 0; try { t = encode(s.body).length; } catch (e) {}
+        return { ...s, tokens: t };
+      }).filter(s => s.tokens > 0).sort((a, b) => b.tokens - a.tokens);
+
+      modeEl.textContent = secs.length ? `· split by ${mode} · ${secs.length} block${secs.length > 1 ? "s" : ""}` : "";
+
+      if (!secs.length) {
+        list.innerHTML = `<div class="empty">Couldn't detect distinct blocks — the whole prompt is one section.</div>`;
+      } else {
+        const maxTok = secs[0].tokens;
+        list.innerHTML = secs.map((s, i) => {
+          const pct = tokens ? (s.tokens / tokens) * 100 : 0;
+          const fillW = maxTok ? (s.tokens / maxTok) * 100 : 0;
+          const lvl = s.level ? `<span class="lvl">${"#".repeat(s.level)}</span>` : "";
+          const safeTitle = s.title.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+          return `<div class="secrow${i === 0 ? " top" : ""}">
+            <span class="fill" style="width:${fillW.toFixed(1)}%"></span>
+            <span class="name">${lvl}${safeTitle}</span>
+            <span class="meta"><b>${fmt(s.tokens)}</b> tok · ${pct.toFixed(1)}%</span>
+          </div>`;
+        }).join("");
+      }
     }
   }
 
