@@ -168,6 +168,8 @@
     </div>
   </div>
 
+  <div class="note" id="escNote" style="display:none;"></div>
+
   <div class="grid">
     <div class="card"><div class="v" id="chars">0</div><div class="k">Characters</div></div>
     <div class="card"><div class="v" id="bytes">0</div><div class="k">UTF-8 bytes</div></div>
@@ -245,6 +247,17 @@
 
   function fmt(n) { return n.toLocaleString("en-US"); }
 
+  // JSON \uXXXX escapes (e.g. copied from a session.update log) are decoded by the
+  // server before tokenization. Decode them so we count what the model actually sees.
+  // Tolerant of one-or-more backslashes (handles double-logged \\u artifacts).
+  function decodeEscapes(s) {
+    return s
+      .replace(/\\+u([0-9a-fA-F]{4})/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+      .replace(/\\+n/g, "\n").replace(/\\+t/g, "\t").replace(/\\+r/g, "\r")
+      .replace(/\\+"/g, '"').replace(/\\+\//g, "/");
+  }
+  const hasUnicodeEscapes = (s) => /\\+u[0-9a-fA-F]{4}/.test(s);
+
   // Split a prompt into editable blocks.
   // Primary: Markdown headings (# .. ######). Fallback: blank-line paragraphs.
   function segment(text) {
@@ -290,6 +303,25 @@
     let tokens = 0;
     if (encode) {
       try { tokens = encode(text).length; } catch (e) { tokens = 0; }
+    }
+
+    // Detect JSON \u escapes (e.g. pasted straight from a session.update log).
+    const esc = $("escNote");
+    if (encode && text.trim() && hasUnicodeEscapes(text)) {
+      const decoded = decodeEscapes(text);
+      const decodedTok = (() => { try { return encode(decoded).length; } catch (e) { return 0; } })();
+      esc.style.display = "block";
+      esc.innerHTML =
+        `This looks like a <b>JSON payload with <code>\\uXXXX</code> escapes</b> (e.g. copied from a <code>session.update</code> log). ` +
+        `Standard JSON <code>\\u</code> escapes are <b>decoded by the server before tokenization</b>, so the model counts the decoded text — not the literal escapes.<br><br>` +
+        `<b>As pasted (literal escapes): ${fmt(tokens)} tokens</b> &nbsp;·&nbsp; ` +
+        `<b style="color:var(--ok)">Decoded (what the model actually counts): ${fmt(decodedTok)} tokens</b><br>` +
+        `<button id="decodeBtn" style="margin-top:10px;">Decode &amp; recount</button> ` +
+        `<span style="font-size:12px;">— replaces the box with the real Devanagari/Unicode text so every count below reflects what the model sees.</span>`;
+      const btn = document.getElementById("decodeBtn");
+      if (btn) btn.onclick = () => { $("input").value = decoded; compute(); };
+    } else {
+      esc.style.display = "none";
     }
 
     $("tokCount").textContent = encode ? fmt(tokens) : "—";

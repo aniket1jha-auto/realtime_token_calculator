@@ -41,6 +41,10 @@ Anything else (emoji, symbols, other scripts) is still counted accurately and gr
 2. Paste your full prompt — **including any tool / function schemas**, since those share the same 16,384 budget.
 3. Read the verdict: green = fits, amber = tight, red = over (will fail at session config).
 
+## Pasting a `session.update` log (JSON `\uXXXX` escapes)
+
+If you copy the `instructions` string straight from a `session.update` payload, non-ASCII text often appears as JSON Unicode escapes like `मैं`. **These do not inflate the real token count** — the server decodes them back to the actual characters before tokenizing. When the tool detects such escapes it shows both numbers (literal vs decoded) and a **Decode & recount** button so every breakdown reflects what the model actually counts. The literal-escape count only matters if your pipeline accidentally *double-encodes* the string.
+
 ## Tip: reclaim budget on bilingual prompts
 
 Only the lines the agent **speaks aloud** need the native script. Stage logic, branch conditions, objection rules, and tool schemas are never spoken — write those in English/ASCII (cheap tokens) and keep the native script only for verbatim spoken dialogue. The per-script table shows exactly where the tokens are going.
