@@ -294,8 +294,16 @@
   }
 
   function compute() {
-    const text = $("input").value;
+    const raw = $("input").value;
     const limit = Math.max(1, parseInt($("limit").value || "16384", 10));
+
+    // If the box holds a JSON payload with \uXXXX / \n / \" escapes (e.g. copied
+    // straight from a session.update log), the server DECODES those escapes before
+    // tokenizing. So everything below must be measured on the decoded text — that is
+    // what the model actually counts. We auto-switch to the decoded basis and keep
+    // the literal "as-pasted" number only as an informational footnote.
+    const escaped = encode && raw.trim() && hasUnicodeEscapes(raw);
+    const text = escaped ? decodeEscapes(raw) : raw;
 
     const chars = [...text].length;
     const bytes = byteLen(text);
@@ -305,21 +313,17 @@
       try { tokens = encode(text).length; } catch (e) { tokens = 0; }
     }
 
-    // Detect JSON \u escapes (e.g. pasted straight from a session.update log).
     const esc = $("escNote");
-    if (encode && text.trim() && hasUnicodeEscapes(text)) {
-      const decoded = decodeEscapes(text);
-      const decodedTok = (() => { try { return encode(decoded).length; } catch (e) { return 0; } })();
+    if (escaped) {
+      let literalTok = 0;
+      try { literalTok = encode(raw).length; } catch (e) { literalTok = 0; }
       esc.style.display = "block";
       esc.innerHTML =
-        `This looks like a <b>JSON payload with <code>\\uXXXX</code> escapes</b> (e.g. copied from a <code>session.update</code> log). ` +
-        `Standard JSON <code>\\u</code> escapes are <b>decoded by the server before tokenization</b>, so the model counts the decoded text — not the literal escapes.<br><br>` +
-        `<b>As pasted (literal escapes): ${fmt(tokens)} tokens</b> &nbsp;·&nbsp; ` +
-        `<b style="color:var(--ok)">Decoded (what the model actually counts): ${fmt(decodedTok)} tokens</b><br>` +
-        `<button id="decodeBtn" style="margin-top:10px;">Decode &amp; recount</button> ` +
-        `<span style="font-size:12px;">— replaces the box with the real Devanagari/Unicode text so every count below reflects what the model sees.</span>`;
-      const btn = document.getElementById("decodeBtn");
-      if (btn) btn.onclick = () => { $("input").value = decoded; compute(); };
+        `Detected a <b>JSON payload with <code>\\uXXXX</code> escapes</b> (looks copied from a <code>session.update</code> log). ` +
+        `The server <b>decodes these escapes before tokenizing</b>, so every count below is measured on the <b>decoded</b> text — what the model actually sees.<br><br>` +
+        `<b style="color:var(--ok)">Decoded (real model count): ${fmt(tokens)} tokens</b> &nbsp;·&nbsp; ` +
+        `<span style="opacity:.8">As-pasted literal escapes: ${fmt(literalTok)} tokens (transport-only, not what the model counts)</span><br>` +
+        `<span style="font-size:12px;">Note: this still includes the JSON envelope and any <code>tools</code> array in the payload — those tokens are real and share the same ${fmt(limit)} budget, but the <code>{ }</code> / <code>"instructions":</code> wrapper keys are not part of your instructions string itself.</span>`;
     } else {
       esc.style.display = "none";
     }
