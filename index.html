@@ -137,7 +137,7 @@
 <div class="wrap">
   <header>
     <h1>Realtime Prompt Token Counter</h1>
-    <p>Tells you <b>before you run your agent</b> whether your prompt will be rejected at <code>session.update</code> against the 16,384-token <code>instructions</code> ceiling. Counts with <code>o200k_base</code>, then applies a <b>gpt-realtime correction</b> for non-Latin scripts (calibrated against real OpenAI error logs). Paste your full prompt, including tool/function schemas. Everything runs in your browser.</p>
+    <p>Tells you <b>before you run your agent</b> whether your prompt will be rejected at <code>session.update</code> against the 16,384-token <code>instructions</code> ceiling. Counts with <code>o200k_base</code>, then applies a <b>gpt-realtime correction</b> for non-Latin scripts. Paste your full prompt. Everything runs in your browser.</p>
     <p style="margin:0 0 20px;color:var(--muted);font-size:13px;">Handles <b style="color:var(--text)">English mixed with Hindi, Marathi, Tamil, Telugu, Kannada, Bengali, Gujarati, Punjabi, Malayalam and Arabic</b>. gpt-realtime charges these scripts far more than any offline library predicts — roughly their UTF-8 byte count — so the verdict gates on that higher number and never wrongly approves a prompt.</p>
   </header>
 
@@ -391,7 +391,6 @@
           ? `Your prompt still fits with <b>${fmt(limit - rtTok)}</b> tokens of headroom — it should pass.`
           : `OpenAI will count <b style="color:var(--bad)">~${fmt(rtTok)}</b> tokens and <b style="color:var(--bad)">reject it at session.update</b> (over by ~${fmt(rtTok - limit)}). ` +
             `Move any non-spoken text — stage logic, branch conditions, tool schemas — to English to reclaim budget.`) +
-        `<br><span style="opacity:.7">Estimate calibrated against real gpt-realtime-2025-08-28 error logs; treated as a conservative upper bound so it never wrongly approves a prompt.</span>` +
         `</div>`;
     } else {
       wire.style.display = "none";
