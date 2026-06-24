@@ -61,11 +61,12 @@
   button:hover { border-color: var(--accent); }
   .toolbar .spacer { flex: 1; }
   .limit-box { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
-  .limit-box input {
+  .limit-box input, .limit-box select {
     width: 78px; background: var(--panel); color: var(--text);
     border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px;
     font-family: var(--mono); font-size: 13px;
   }
+  .limit-box select { width: auto; max-width: 320px; }
 
   /* verdict bar */
   .verdict {
@@ -150,6 +151,13 @@
     <button id="sample">Load Devanagari sample</button>
     <div class="spacer"></div>
     <div class="limit-box">
+      <label for="pipeMode">Pipeline</label>
+      <select id="pipeMode" title="How your backend serializes the instructions string before session.update">
+        <option value="double">Double-encoded ( \u sent literally ) — my system</option>
+        <option value="correct">Correct ( server decodes \u )</option>
+      </select>
+    </div>
+    <div class="limit-box">
       <label for="limit">Limit</label>
       <input id="limit" type="number" value="16384" min="1" />
       <span>tokens</span>
@@ -159,7 +167,7 @@
   <div class="verdict">
     <div>
       <div class="big" id="tokCount">—</div>
-      <div class="label">tokens</div>
+      <div class="label" id="tokLabel">tokens</div>
     </div>
     <div class="barwrap">
       <div id="pill" class="pill ok">Ready</div>
@@ -355,30 +363,54 @@
       esc.style.display = "none";
     }
 
-    // For a NORMAL prompt (no escapes yet) that contains non-ASCII text, project what
-    // the count becomes if the pipeline ships it as \uXXXX literally (double-encode case).
+    // CORRECT count = what a healthy server tokenizes after decoding (the true cost).
+    // WIRE count    = what OpenAI actually counts if the pipeline DOUBLE-ENCODES, i.e.
+    //                 ships the instructions with literal \uXXXX escapes (every non-ASCII
+    //                 char becomes 6 ASCII chars). This is what was breaking the session.
+    const correctTok = tokens;
+    let wireTok = correctTok;
+    if (encode && text.trim() && hasNonAscii(text)) {
+      try { wireTok = encode(toAsciiEscaped(text)).length; } catch (e) { wireTok = correctTok; }
+    }
+    const mode = $("pipeMode").value;           // "double" (my system) | "correct"
+    const gate = mode === "double" ? wireTok : correctTok;
+    const inflated = wireTok > correctTok;
+
+    // Dual go/no-go readout — explicit approval for BOTH serialization cases.
     const wire = $("wireNote");
-    if (encode && !escaped && text.trim() && hasNonAscii(text)) {
-      let wireTok = 0;
-      try { wireTok = encode(toAsciiEscaped(text)).length; } catch (e) { wireTok = 0; }
-      const over = wireTok > limit;
+    if (encode && text.trim() && inflated) {
+      const cOk = correctTok <= limit, wOk = wireTok <= limit;
+      const row = (label, n, ok, isGate) =>
+        `<div style="display:flex;align-items:center;gap:8px;${isGate ? "font-weight:700;" : "opacity:.92;"}">` +
+        `<span style="color:${ok ? "var(--ok)" : "var(--bad)"};font-size:15px;">${ok ? "PASS" : "FAIL"}</span>` +
+        `<span style="min-width:230px;">${label}</span>` +
+        `<span>${fmt(n)} / ${fmt(limit)} — ${ok ? `fits (${fmt(limit - n)} headroom)` : `OVER by ${fmt(n - limit)}`}</span>` +
+        `${isGate ? `<span style="margin-left:8px;font-size:11px;background:#2a2f3a;padding:2px 8px;border-radius:10px;">your pipeline</span>` : ""}</div>`;
       wire.style.display = "block";
       wire.innerHTML =
-        `<b>Actual tokens (what the model counts): ${fmt(tokens)}</b><br>` +
-        `<b style="color:${over ? "var(--bad)" : "var(--muted)"}">If escaped to <code>\\uXXXX</code> on the wire: ${fmt(wireTok)} tokens</b><br><br>` +
-        `<span style="font-size:12px;">A correct server <b>decodes <code>\\u</code> escapes before tokenizing</b>, so your real number is <b>${fmt(tokens)}</b>. ` +
-        `The escaped figure only becomes what the model sees if your pipeline <b>double-encodes</b> the string (e.g. <code>json.dumps(..., ensure_ascii=True)</code> applied to already-serialized JSON). ` +
-        `If your live error fires near <b>${fmt(wireTok)}</b>, that's a double-encoding bug in your code — not a prompt you need to shorten.</span>`;
+        `<div style="margin-bottom:8px;">Pre-flight check for <b>session.update</b> — cost depends on how the string is serialized:</div>` +
+        row("Correctly encoded (server decodes \\u):", correctTok, cOk, mode === "correct") +
+        row("Double-encoded (\\uXXXX sent literally):", wireTok, wOk, mode === "double") +
+        `<div style="margin-top:10px;font-size:12px;">` +
+        (mode === "double"
+          ? `Your pipeline currently <b>double-encodes</b>, so OpenAI counts <b>${fmt(wireTok)}</b> tokens. ` +
+            (wOk ? `That still fits — this prompt will pass. `
+                 : `That is <b style="color:var(--bad)">over the ${fmt(limit)} limit — it will fail at session.update.</b> `) +
+            `The prompt itself is only <b>${fmt(correctTok)}</b> tokens; fixing the double-encoding (serialize JSON once) is the real fix and leaves ${fmt(limit - correctTok)} headroom.`
+          : `With a correctly-encoded pipeline OpenAI counts <b>${fmt(correctTok)}</b> tokens. ` +
+            `If the backend double-encodes, the same prompt jumps to <b>${fmt(wireTok)}</b> — switch Pipeline to “my system” to test that.`) +
+        `</div>`;
     } else {
       wire.style.display = "none";
     }
 
-    $("tokCount").textContent = encode ? fmt(tokens) : "—";
+    $("tokLabel").textContent = (inflated && mode === "double") ? "tokens (as your pipeline sends them)" : "tokens";
+    $("tokCount").textContent = encode ? fmt(gate) :"—";
     $("chars").textContent = fmt(chars);
     $("bytes").textContent = fmt(bytes);
-    const ratio = chars ? tokens / chars : 0;
+    const ratio = chars ? correctTok / chars : 0;
     $("ratio").textContent = ratio.toFixed(2);
-    $("headroom").textContent = fmt(limit - tokens);
+    $("headroom").textContent = fmt(limit - gate);
 
     // ratio hint
     const rh = $("ratioHint");
@@ -387,23 +419,24 @@
     else if (ratio > 0.45) rh.textContent = "mixed";
     else rh.textContent = "Latin-efficient";
 
-    // verdict
-    const pct = Math.min(100, (tokens / limit) * 100);
+    // verdict — gated on the selected pipeline mode (defaults to YOUR double-encoding system)
+    const pct = Math.min(100, (gate / limit) * 100);
     const bar = $("bar");
     const barI = bar.querySelector("i");
     barI.style.width = pct + "%";
     const pill = $("pill");
     bar.className = "bar";
     pill.className = "pill";
-    if (tokens > limit) {
+    const modeTag = mode === "double" ? " (double-encoded)" : "";
+    if (gate > limit) {
       bar.classList.add("bad"); pill.classList.add("bad");
-      pill.textContent = `Over by ${fmt(tokens - limit)} tokens — will fail at session config`;
-    } else if (tokens > limit * 0.9) {
+      pill.textContent = `Over by ${fmt(gate - limit)} tokens${modeTag} — will fail at session.update`;
+    } else if (gate > limit * 0.9) {
       bar.classList.add("warn"); pill.classList.add("warn");
-      pill.textContent = `Tight — ${fmt(limit - tokens)} tokens of headroom`;
+      pill.textContent = `Tight — ${fmt(limit - gate)} tokens of headroom${modeTag}`;
     } else {
       bar.classList.add("ok"); pill.classList.add("ok");
-      pill.textContent = chars ? `Fits — ${fmt(limit - tokens)} tokens of headroom` : "Ready";
+      pill.textContent = chars ? `Fits — ${fmt(limit - gate)} tokens of headroom${modeTag}` : "Ready";
     }
     $("barLabel").textContent = chars ? `${pct.toFixed(1)}% of ${fmt(limit)} limit` : "";
 
@@ -484,6 +517,7 @@
   let t = null;
   $("input").addEventListener("input", () => { clearTimeout(t); t = setTimeout(compute, 80); });
   $("limit").addEventListener("input", compute);
+  $("pipeMode").addEventListener("change", compute);
   $("clear").addEventListener("click", () => { $("input").value = ""; compute(); $("input").focus(); });
   $("paste").addEventListener("click", async () => {
     try { $("input").value = await navigator.clipboard.readText(); compute(); }
